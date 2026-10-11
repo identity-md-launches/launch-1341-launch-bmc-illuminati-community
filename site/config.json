@@ -1,0 +1,31 @@
+{
+  "_comment": "Filled in by the launch step after deployment. Empty strings mean 'not launched yet'; the site shows a notice instead of guessing.",
+  "chainId": 1,
+  "chainName": "Ethereum",
+  "rpcUrl": "https://ethereum-rpc.publicnode.com",
+  "explorer": "https://etherscan.io",
+  "token": "",
+  "hook": "",
+  "router": "",
+  "poolManager": "",
+  "poolId": "",
+  "pool": {
+    "currency0": "0x0000000000000000000000000000000000000000",
+    "fee": 12500,
+    "tickSpacing": 60
+  },
+  "communityWallet": "0x83027AD9d0D5374335086c539dADD1db983441B0",
+  "launcherFeeClaim": {
+    "_comment": "The IMD LaunchFees contract that pays the launcher's 1% LP-fee share. Set after launch from the launch record: address, the claim function's ABI fragment and its arguments.",
+    "address": "",
+    "abi": [],
+    "method": "",
+    "args": []
+  },
+  "links": {
+    "uniswap": "",
+    "telegram": "",
+    "x": "",
+    "docs": ""
+  }
+}

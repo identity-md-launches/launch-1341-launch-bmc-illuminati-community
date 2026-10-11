@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BMC Illuminati (BMC) — community token on Uniswap v4</title>
+  <meta name="description" content="BMC Illuminati: a fixed-supply ERC-20 on Ethereum, paired with ETH on Uniswap v4. 1% of every buy goes to the community wallet in ETH; 1% of every sale is burned." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="eye" aria-hidden="true">◬</span>
+      <div>
+        <h1>BMC Illuminati</h1>
+        <p class="sub">Symbol <strong>BMC</strong> · Ethereum · Uniswap v4</p>
+      </div>
+    </div>
+    <nav class="links" id="community-links"></nav>
+  </header>
+
+  <main>
+    <section class="notice" id="launch-notice" hidden>
+      This site is waiting for the launch record. Contract addresses appear here once the token and pool are live.
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Token</h2>
+        <dl>
+          <dt>Name</dt><dd id="t-name">BMC Illuminati</dd>
+          <dt>Symbol</dt><dd id="t-symbol">BMC</dd>
+          <dt>Contract</dt><dd><a id="t-address" class="mono" target="_blank" rel="noopener">—</a></dd>
+          <dt>Initial supply</dt><dd id="t-initial">1,000,000,000 BMC</dd>
+          <dt>Total supply (after burns)</dt><dd id="t-total">—</dd>
+          <dt>Burned so far</dt><dd id="t-burned">—</dd>
+          <dt>Circulating supply</dt><dd id="t-circ">—</dd>
+        </dl>
+        <p class="small">Circulating supply equals total supply: every token is a plain ERC-20 token with no locks, and burns reduce the total directly.</p>
+      </article>
+
+      <article class="card">
+        <h2>Pool</h2>
+        <dl>
+          <dt>Pair</dt><dd>BMC / ETH (native)</dd>
+          <dt>Opening market cap</dt><dd>10 ETH for the whole supply</dd>
+          <dt>LP fee</dt><dd>1.25% per trade: 1% to the launcher, 0.25% to IMD</dd>
+          <dt>Hook</dt><dd><a id="h-address" class="mono" target="_blank" rel="noopener">—</a></dd>
+          <dt>Pool id</dt><dd id="p-id" class="mono">—</dd>
+          <dt>ETH paid to community</dt><dd id="h-eth">—</dd>
+          <dt>BMC burned by the hook</dt><dd id="h-burned">—</dd>
+        </dl>
+        <p><a id="pool-link" class="button secondary" target="_blank" rel="noopener">Open the live Uniswap pool</a></p>
+      </article>
+    </section>
+
+    <section class="card wide">
+      <h2>How the fees work</h2>
+      <ul class="rules">
+        <li><strong>Buying BMC with ETH:</strong> the hook takes an extra <strong>1% of the ETH</strong> you pay and sends it, as ETH, to the community wallet <a id="cw-link" class="mono" target="_blank" rel="noopener"></a>. On an exact-input buy it comes off what you send; on an exact-output buy it is added to what you pay.</li>
+        <li><strong>Selling BMC for ETH:</strong> the hook takes <strong>1% of the BMC</strong> you sell and burns it. The burn permanently reduces total supply; nothing is sent to anyone.</li>
+        <li><strong>On top of that</strong> the pool charges Uniswap's 1.25% LP fee on every trade, split 1% to the launcher and 0.25% to IMD.</li>
+        <li><strong>Nobody can change this.</strong> The rates and the wallet are immutable constructor arguments. The hook has no owner, no pause, and never blocks a swap. If the PoolManager cannot pay a fee at the moment of a trade, the hook books it as a claim that anyone can redeem with <code>collect()</code>.</li>
+      </ul>
+      <p class="small">Utility note: selling permanently removes tokens from supply. Over time this reduces circulating supply, which can support price if demand stays constant or grows. This is not a guaranteed price increase.</p>
+    </section>
+
+    <section class="grid">
+      <article class="card" id="wallet-card">
+        <h2>Your wallet</h2>
+        <button id="connect" class="button">Connect wallet</button>
+        <div id="wallet" hidden>
+          <dl>
+            <dt>Address</dt><dd id="w-address" class="mono">—</dd>
+            <dt>ETH</dt><dd id="w-eth">—</dd>
+            <dt>BMC</dt><dd id="w-bmc">—</dd>
+          </dl>
+          <div id="claim-box" hidden>
+            <h3>Launcher fee share</h3>
+            <p class="small">The connected wallet is the fee recipient. The hook's ETH claims (if any) can be collected by anyone; the launcher's 1% LP-fee share is claimed from the IMD fee contract.</p>
+            <p>
+              <button id="collect-hook" class="button secondary">Collect pending hook fees</button>
+              <button id="claim-lp" class="button secondary">Claim 1% LP fee share</button>
+            </p>
+            <p id="claim-status" class="small"></p>
+          </div>
+        </div>
+      </article>
+
+      <article class="card" id="trade-card">
+        <h2>Trade</h2>
+        <div class="tabs">
+          <button class="tab active" data-tab="buy">Buy</button>
+          <button class="tab" data-tab="sell">Sell</button>
+        </div>
+        <form id="buy-form">
+          <label>ETH to spend <input id="buy-eth" type="text" inputmode="decimal" placeholder="0.1" /></label>
+          <label>Max slippage % <input id="buy-slip" type="number" min="0" max="50" step="0.1" value="1" /></label>
+          <p class="small" id="buy-quote">Enter an amount to see the expected BMC.</p>
+          <button class="button" type="submit">Buy BMC</button>
+        </form>
+        <form id="sell-form" hidden>
+          <label>BMC to sell <input id="sell-bmc" type="text" inputmode="decimal" placeholder="1000" /></label>
+          <label>Max slippage % <input id="sell-slip" type="number" min="0" max="50" step="0.1" value="1" /></label>
+          <p class="small" id="sell-quote">Enter an amount to see the expected ETH. 1% of what you sell is burned.</p>
+          <button class="button" type="submit">Approve exact amount, then sell</button>
+        </form>
+        <p id="trade-status" class="small"></p>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    <p class="small">No admin actions exist. All percentages and the community wallet are fixed at deployment. Trading carries risk; read the contracts before you trade.</p>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

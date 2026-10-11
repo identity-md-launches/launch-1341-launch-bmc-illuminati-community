@@ -198,7 +198,7 @@ contract BMCHookTest is BMCFixture {
         assertEq(trader.balance, 10 ether - ethIn, "the trader paid exactly what was sent");
     }
 
-    function test_buyExactOutput_feeIsOnePercentOfTheEthThePoolCharged() public {
+    function test_buyExactOutput_feeIsOnePercentOfTotalEthPaid() public {
         uint256 tokensOut = 1_000_000 ether;
         uint256 managerBefore = address(manager).balance;
 
@@ -209,7 +209,8 @@ contract BMCHookTest is BMCFixture {
         uint256 poolEth = address(manager).balance - managerBefore;
         assertGt(fee, 0);
         assertEq(ethIn, poolEth + fee, "the swapper paid the pool's price plus the fee");
-        assertEq(fee, poolEth / 100, "the fee is 1% of the ETH side");
+        assertEq(fee, ethIn / 100, "the fee is 1% of the total ETH input");
+        assertEq(fee, poolEth * BUY_FEE_BPS / (10_000 - BUY_FEE_BPS), "grossed up from the pool input");
         assertEq(token.balanceOf(trader), 10_000_000 ether + tokensOut, "exactly the requested tokens");
         assertEq(trader.balance, 10 ether - ethIn, "unused ETH was refunded");
         assertEq(hook.pendingEthFees(), 0);
@@ -246,7 +247,7 @@ contract BMCHookTest is BMCFixture {
         assertEq(token.balanceOf(trader), 10_000_000 ether - tokensIn);
     }
 
-    function test_sellExactOutput_burnsOnePercentOfTheTokensThePoolCharged() public {
+    function test_sellExactOutput_burnsOnePercentOfTotalTokensPaid() public {
         uint256 ethOut = 0.001 ether;
         uint256 supplyBefore = token.totalSupply();
         uint256 managerTokensBefore = token.balanceOf(address(manager));
@@ -258,7 +259,8 @@ contract BMCHookTest is BMCFixture {
         uint256 poolTokens = token.balanceOf(address(manager)) - managerTokensBefore;
         assertGt(burned, 0);
         assertEq(tokensIn, poolTokens + burned, "the seller paid the pool's amount plus the burn");
-        assertEq(burned, poolTokens / 100, "the burn is 1% of the tokens the pool charged");
+        assertEq(burned, tokensIn / 100, "the burn is 1% of the total tokens sold");
+        assertEq(burned, poolTokens * SELL_BURN_BPS / (10_000 - SELL_BURN_BPS), "grossed up from pool input");
         assertEq(trader.balance, 10 ether + ethOut, "exactly the requested ETH");
         assertEq(token.balanceOf(trader), 10_000_000 ether - tokensIn, "unused tokens were refunded");
         assertEq(hook.pendingBurns(), 0);
@@ -335,7 +337,7 @@ contract BMCHookTokenOnlyPoolTest is BMCFixture {
         uint256 ethIn = router.buyExactOut{value: 1 ether}(key, 1_000_000 ether);
         uint256 pending = hook.pendingEthFees();
         assertGt(pending, 0);
-        assertEq(pending, (ethIn - pending) / 100);
+        assertEq(pending, ethIn / 100);
         hook.collect();
         assertEq(feeRecipient.balance, pending);
     }
@@ -362,8 +364,8 @@ contract BMCHookTokenOnlyPoolTest is BMCFixture {
         assertEq(feeRecipient.balance, 0.015 ether);
     }
 
-    function test_exactInputFeeIsOnTheSpecifiedInputBeforeTheFill() public {
-        // A buy far larger than the pool moves the price a long way; the fee is still 1% of what was specified.
+    function test_largeFullyFilledBuyPaysOnePercent() public {
+        // This full-range position has enough BMC to fill even this large input.
         vm.deal(trader, 100 ether);
         vm.prank(trader);
         uint256 out = router.buyExactIn{value: 100 ether}(key, 0);
@@ -410,7 +412,7 @@ contract BMCHookEthOnlyPoolTest is BMCFixture {
         uint256 tokensIn = router.sellExactOut(key, 0.001 ether, 5_000_000 ether);
         uint256 pending = hook.pendingBurns();
         assertGt(pending, 0);
-        assertEq(pending, (tokensIn - pending) / 100);
+        assertEq(pending, tokensIn / 100);
         hook.collect();
         assertEq(token.totalSupply(), supplyBefore - pending);
     }

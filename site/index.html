@@ -60,7 +60,7 @@
         <li><strong>Buying BMC with ETH:</strong> the hook takes an extra <strong>1% of the ETH</strong> you pay and sends it, as ETH, to the community wallet <a id="cw-link" class="mono" target="_blank" rel="noopener"></a>. On an exact-input buy it comes off what you send; on an exact-output buy it is added to what you pay.</li>
         <li><strong>Selling BMC for ETH:</strong> the hook takes <strong>1% of the BMC</strong> you sell and burns it. The burn permanently reduces total supply; nothing is sent to anyone.</li>
         <li><strong>On top of that</strong> the pool charges Uniswap's 1.25% LP fee on every trade, split 1% to the launcher and 0.25% to IMD.</li>
-        <li><strong>Nobody can change this.</strong> The rates and the wallet are immutable constructor arguments. The hook has no owner, no pause, and never blocks a swap. If the PoolManager cannot pay a fee at the moment of a trade, the hook books it as a claim that anyone can redeem with <code>collect()</code>.</li>
+        <li><strong>Nobody can change this.</strong> The rates and the wallet are immutable constructor arguments. The hook has no owner or pause. Exact-input trades must fill completely after the fee, or revert without a fee or burn. If liquidity is insufficient, reduce the order or wait for liquidity. If the PoolManager cannot pay yet or the community wallet rejects ETH, the fee stays as a claim that anyone can retry with <code>collect()</code>.</li>
       </ul>
       <p class="small">Utility note: selling permanently removes tokens from supply. Over time this reduces circulating supply, which can support price if demand stays constant or grows. This is not a guaranteed price increase.</p>
     </section>

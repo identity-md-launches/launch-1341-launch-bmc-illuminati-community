@@ -34,13 +34,18 @@ contract DeployBMC is Script {
 
     /// @notice Deploys everything from `config`. Tests call this directly with their own config.
     function deploy(Config memory config) public returns (Deployed memory d) {
+        return _deploy(config, address(this));
+    }
+
+    /// @dev Local calls CREATE2 from this contract; broadcast CREATE2 uses Foundry's proxy.
+    function _deploy(Config memory config, address create2Deployer) internal returns (Deployed memory d) {
         d.token = new BMCToken();
         bytes memory creationCode = abi.encodePacked(
             type(BMCHook).creationCode,
             abi.encode(config.poolManager, address(d.token), config.feeRecipient, config.buyFeeBps, config.sellBurnBps)
         );
         uint160 flags = BMC_HOOK_FLAGS;
-        (bytes32 salt, address predicted) = HookDeployer.mine(address(this), creationCode, flags, 500_000);
+        (bytes32 salt, address predicted) = HookDeployer.mine(create2Deployer, creationCode, flags, 500_000);
         d.hookSalt = salt;
         d.hook = new BMCHook{salt: salt}(
             config.poolManager, address(d.token), config.feeRecipient, config.buyFeeBps, config.sellBurnBps
@@ -58,7 +63,7 @@ contract DeployBMC is Script {
             sellBurnBps: LAUNCH_SELL_BURN_BPS
         });
         vm.startBroadcast();
-        d = deploy(config);
+        d = _deploy(config, CREATE2_FACTORY);
         vm.stopBroadcast();
         console2.log("BMCToken", address(d.token));
         console2.log("BMCHook", address(d.hook));

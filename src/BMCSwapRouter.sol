@@ -35,6 +35,7 @@ contract BMCSwapRouter is IUnlockCallback {
     error TooMuchRequested(uint256 required, uint256 maximum);
     error ZeroAmount();
     error EthTransferFailed();
+    error PartialFill(uint256 received, uint256 requested);
 
     constructor(IPoolManager _poolManager) {
         poolManager = _poolManager;
@@ -58,6 +59,8 @@ contract BMCSwapRouter is IUnlockCallback {
         _requireEthPool(key);
         if (tokensOut == 0) revert ZeroAmount();
         BalanceDelta delta = _swap(key, true, int256(tokensOut));
+        uint256 received = uint256(uint128(delta.amount1()));
+        if (received != tokensOut) revert PartialFill(received, tokensOut);
         ethIn = uint256(uint128(-delta.amount0()));
         _refundEth();
         emit Swapped(msg.sender, true, ethIn, tokensOut);
@@ -84,6 +87,8 @@ contract BMCSwapRouter is IUnlockCallback {
         if (ethOut == 0 || maxTokensIn == 0) revert ZeroAmount();
         IERC20Minimal(Currency.unwrap(key.currency1)).transferFrom(msg.sender, address(this), maxTokensIn);
         BalanceDelta delta = _swap(key, false, int256(ethOut));
+        uint256 received = uint256(uint128(delta.amount0()));
+        if (received != ethOut) revert PartialFill(received, ethOut);
         tokensIn = uint256(uint128(-delta.amount1()));
         if (tokensIn > maxTokensIn) revert TooMuchRequested(tokensIn, maxTokensIn);
         _refundTokens(key.currency1);

@@ -33,11 +33,12 @@ interface IBurnableToken {
 ///    reduces the token's total supply.
 /// Exact-input swaps are charged in `beforeSwap` (the fee comes off the specified input, and the pool
 /// swaps the rest); exact-output swaps are charged in `afterSwap` (the fee is added to the unspecified
-/// input). A fee is paid out of the PoolManager's own balance: when it covers the fee the hook takes
-/// it at once, otherwise it mints itself an ERC-6909 claim that anyone can redeem later with `collect`.
+/// input). Exact-input swaps must fill the entire input less the fee, or revert atomically. Both swap
+/// shapes charge the rate on the total input, including the hook fee. ETH payments that cannot be
+/// delivered become ERC-6909 claims that anyone can retry with `collect`.
 ///
 /// Nobody can change anything: every rate and the recipient are immutable constructor arguments. There
-/// is no owner, no pause, no other fee, and no swap is ever blocked or altered otherwise.
+/// is no owner, no pause and no other fee.
 contract BMCHook is IHooks, IUnlockCallback {
     using SafeCast for uint256;
     using SafeCast for int256;
@@ -49,6 +50,8 @@ contract BMCHook is IHooks, IUnlockCallback {
     uint256 public constant MAX_RATE_BPS = 5_000;
     /// @notice The address bits this hook must be deployed under; equals `getHookPermissions()`.
     uint160 public constant HOOK_FLAGS = BMC_HOOK_FLAGS;
+    /// @notice Bounded payment attempt; a recipient exhausting this gas leaves a claim instead.
+    uint256 public constant ETH_PAYOUT_GAS = 100_000;
 
     /// @notice The Uniswap v4 PoolManager this hook serves.
     IPoolManager public immutable poolManager;
@@ -69,6 +72,7 @@ contract BMCHook is IHooks, IUnlockCallback {
     uint256 public totalEthFeesPaid;
     /// @notice Total BMC burned by the sell rule.
     uint256 public totalTokensBurned;
+    bool private payingEth;
 
     event PoolAttached(PoolId indexed id, Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing);
     event BuyFeeTaken(uint256 amount, bool paidDirectly);
@@ -81,6 +85,8 @@ contract BMCHook is IHooks, IUnlockCallback {
     error WrongPoolCurrencies();
     error AlreadyInitialized();
     error HookNotImplemented();
+    error PartialFill(uint256 expectedInput, uint256 consumedInput);
+    error ReentrantSwap();
 
     modifier onlyPoolManager() {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
@@ -169,6 +175,7 @@ contract BMCHook is IHooks, IUnlockCallback {
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
+        if (payingEth) revert ReentrantSwap();
         if (params.amountSpecified >= 0) {
             return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         }
@@ -187,15 +194,24 @@ contract BMCHook is IHooks, IUnlockCallback {
     }
 
     /// @inheritdoc IHooks
-    /// @dev Exact-output swaps pay here: the fee is a share of the unspecified input the pool charged
-    /// and is added to what the swapper owes.
+    /// @dev Refuses exact-input short fills so the precharged fee never exceeds the agreed share.
+    /// Exact-output fees are grossed up from the pool's input to the same share of total input.
     function afterSwap(address, PoolKey calldata, SwapParams calldata params, BalanceDelta delta, bytes calldata)
         external
         override
         onlyPoolManager
         returns (bytes4, int128)
     {
-        if (params.amountSpecified <= 0) {
+        if (params.amountSpecified < 0) {
+            uint256 amountIn = uint256(-params.amountSpecified);
+            uint256 rate = params.zeroForOne ? buyFeeBps : sellBurnBps;
+            uint256 expectedInput = amountIn - (amountIn * rate) / BPS;
+            int128 inputDelta = params.zeroForOne ? delta.amount0() : delta.amount1();
+            uint256 consumedInput = inputDelta < 0 ? uint256(-int256(inputDelta)) : 0;
+            if (consumedInput != expectedInput) revert PartialFill(expectedInput, consumedInput);
+            return (IHooks.afterSwap.selector, 0);
+        }
+        if (params.amountSpecified == 0) {
             return (IHooks.afterSwap.selector, 0);
         }
         uint256 fee;
@@ -203,13 +219,13 @@ contract BMCHook is IHooks, IUnlockCallback {
             // Buy: ETH (currency0) is the unspecified input; the swapper's delta is negative.
             int128 ethDelta = delta.amount0();
             uint256 ethIn = ethDelta < 0 ? uint256(uint128(-ethDelta)) : 0;
-            fee = (ethIn * buyFeeBps) / BPS;
+            fee = (ethIn * buyFeeBps) / (BPS - buyFeeBps);
             if (fee > 0) _takeEthFee(fee);
         } else {
             // Sell: BMC (currency1) is the unspecified input.
             int128 tokenDelta = delta.amount1();
             uint256 tokenIn = tokenDelta < 0 ? uint256(uint128(-tokenDelta)) : 0;
-            fee = (tokenIn * sellBurnBps) / BPS;
+            fee = (tokenIn * sellBurnBps) / (BPS - sellBurnBps);
             if (fee > 0) _takeAndBurn(fee);
         }
         return (IHooks.afterSwap.selector, fee.toInt128());
@@ -219,17 +235,25 @@ contract BMCHook is IHooks, IUnlockCallback {
     // Fee settlement
     // ------------------------------------------------------------------
 
-    /// @dev Sends `fee` ETH to the recipient now when the PoolManager holds enough, else books an
-    /// ERC-6909 ETH claim for the hook that `collect` redeems later.
+    /// @dev Sends ETH when possible; insufficient funds or a failed payment leave an ETH claim.
     function _takeEthFee(uint256 fee) internal {
-        if (address(poolManager).balance >= fee) {
-            poolManager.take(CurrencyLibrary.ADDRESS_ZERO, feeRecipient, fee);
+        if (address(poolManager).balance >= fee && _tryPayEth(fee)) {
             totalEthFeesPaid += fee;
             emit BuyFeeTaken(fee, true);
         } else {
             poolManager.mint(address(this), CurrencyLibrary.ADDRESS_ZERO.toId(), fee);
             emit BuyFeeTaken(fee, false);
         }
+    }
+
+    /// @dev A reverted `take` rolls back its manager delta too. Bound gas so an uncooperative
+    /// delegated wallet cannot exhaust the swap's gas; block trading reentry during the payment.
+    function _tryPayEth(uint256 amount) internal returns (bool paid) {
+        payingEth = true;
+        try poolManager.take{gas: ETH_PAYOUT_GAS}(CurrencyLibrary.ADDRESS_ZERO, feeRecipient, amount) {
+            paid = true;
+        } catch {}
+        payingEth = false;
     }
 
     /// @dev Pulls `amount` BMC out of the PoolManager and burns it when the manager holds enough,
@@ -258,7 +282,7 @@ contract BMCHook is IHooks, IUnlockCallback {
     }
 
     /// @notice Redeems whatever claims the hook holds: pays the ETH to the recipient and burns the BMC.
-    /// Anyone may call it; it has no effect beyond what the PoolManager's balance can cover.
+    /// Anyone may call it; unsuccessful ETH payments retain their claims for a later retry.
     function collect() external {
         poolManager.unlock("");
     }
@@ -267,8 +291,13 @@ contract BMCHook is IHooks, IUnlockCallback {
     function unlockCallback(bytes calldata) external override onlyPoolManager returns (bytes memory) {
         uint256 ethPaid = _redeem(CurrencyLibrary.ADDRESS_ZERO, address(poolManager).balance);
         if (ethPaid > 0) {
-            poolManager.take(CurrencyLibrary.ADDRESS_ZERO, feeRecipient, ethPaid);
-            totalEthFeesPaid += ethPaid;
+            if (_tryPayEth(ethPaid)) {
+                totalEthFeesPaid += ethPaid;
+            } else {
+                // Restore the burned claims, cancelling their positive manager delta.
+                poolManager.mint(address(this), CurrencyLibrary.ADDRESS_ZERO.toId(), ethPaid);
+                ethPaid = 0;
+            }
         }
         Currency c = Currency.wrap(token);
         uint256 burned = _redeem(c, IERC20Minimal(token).balanceOf(address(poolManager)));

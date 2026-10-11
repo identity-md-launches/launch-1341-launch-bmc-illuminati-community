@@ -176,7 +176,11 @@
       const v = $("sell-bmc").value.trim();
       if (!v) return status($("sell-quote"), "Enter an amount to see the expected ETH.");
       if (!account) return status($("sell-quote"), "Connect a wallet holding BMC to quote a sale.");
-      const out = await quoteSell(ethers.parseUnits(v, decimals));
+      const tokensIn = ethers.parseUnits(v, decimals);
+      if (await token.allowance(account, cfg.router) < tokensIn) {
+        return status($("sell-quote"), "Approve the exact amount using the sell button; the ETH quote follows confirmation.");
+      }
+      const out = await quoteSell(tokensIn);
       status($("sell-quote"), `Expected: about ${fmt(out, 18, 6)} ETH. 1% of the BMC you sell is burned.`);
     } catch (e) { status($("sell-quote"), "Could not quote: " + (e.shortMessage || e.message), true); }
   });
@@ -203,8 +207,6 @@
     if (!signer) return status($("trade-status"), "Connect a wallet first.", true);
     try {
       const tokensIn = ethers.parseUnits($("sell-bmc").value.trim(), decimals);
-      const expected = await quoteSell(tokensIn);
-      const minOut = withSlippage(expected, $("sell-slip").value || "0");
       const tokenW = new ethers.Contract(cfg.token, TOKEN_ABI, signer);
       const allowance = await tokenW.allowance(account, cfg.router);
       if (allowance < tokensIn) {
@@ -212,6 +214,9 @@
         const a = await tokenW.approve(cfg.router, tokensIn);
         await a.wait();
       }
+      // Simulating sellExactIn pulls tokens too, so quote only after the approval is mined.
+      const expected = await quoteSell(tokensIn);
+      const minOut = withSlippage(expected, $("sell-slip").value || "0");
       status($("trade-status"), "Step 2/2: confirm the sale in your wallet…");
       const router = new ethers.Contract(cfg.router, ROUTER_ABI, signer);
       const tx = await router.sellExactIn(key, tokensIn, minOut);
